@@ -254,7 +254,7 @@
 </div>
 
 <div style="position:fixed;bottom:8px;left:12px;font-size:10px;color:var(--border);font-family:'DM Mono',monospace;z-index:50;letter-spacing:1px">
-  v1.7
+  v1.8
 </div>
 
 <!-- Modal -->
@@ -293,6 +293,11 @@
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Annuler</button>
       <button class="btn-confirm" onclick="addProduct()">Ajouter →</button>
+    </div>
+    <div style="text-align:center;margin-top:10px">
+      <button onclick="saveToSheets()" style="background:transparent;border:none;color:var(--muted);font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px;cursor:pointer;text-decoration:underline;text-underline-offset:3px">
+        + Enregistrer aussi dans la base produits Sheets
+      </button>
     </div>
   </div>
 </div>
@@ -580,7 +585,28 @@ async function confirmEditDate() {
     toast('⚠ Erreur réseau', true);
   }
 }
-// ── Phase 4 : Scanner (Html5-QrCode) ──
+// ── Enregistrer dans la base Sheets ──
+async function saveToSheets() {
+  const brand   = document.getElementById('f-brand').value.trim();
+  const name    = document.getElementById('f-name').value.trim();
+  const barcode = document.getElementById('f-barcode').value.trim();
+  if (!name) { toast('⚠ Remplis au moins le nom du produit', true); return; }
+
+  toast(`⏳ Enregistrement de "${name}" dans Sheets…`);
+  try {
+    const data = await api({ action: 'addProduct', brand, name, barcode });
+    if (data.success) {
+      toast(`✅ "${name}" ajouté dans la base produits !`);
+      // Rafraîchit la base locale pour les prochaines recherches
+      const sheetsData = await api({ action: 'getProducts' });
+      if (sheetsData.success) sheetProducts = sheetsData.products;
+    } else {
+      toast(`⚠ Erreur : ${data.error || 'inconnue'}`, true);
+    }
+  } catch(e) {
+    toast('⚠ Erreur réseau', true);
+  }
+}
 let html5Scanner = null;
 
 function preloadZXing() {
@@ -592,8 +618,13 @@ function preloadZXing() {
 }
 
 async function openScanner() {
+  // Affiche le modal EN PREMIER — Html5Qrcode a besoin d'un div visible avec dimensions
   document.getElementById('modal-scanner').style.display = 'flex';
   document.getElementById('scan-status').textContent = '⏳ Chargement du scanner…';
+  document.getElementById('scanner-inner').innerHTML = '';
+
+  // Attend que le modal soit rendu dans le DOM (2 frames)
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
   // Attend que Html5Qrcode soit dispo (max 6s)
   for (let i = 0; i < 20; i++) {
@@ -611,7 +642,7 @@ async function openScanner() {
       { facingMode: 'environment' },
       {
         fps: 15,
-        qrbox: { width: 280, height: 160 },
+        qrbox: { width: 250, height: 150 },
         aspectRatio: 1.5,
         formatsToSupport: [
           Html5QrcodeSupportedFormats.EAN_13,
@@ -623,11 +654,11 @@ async function openScanner() {
         ]
       },
       (code) => { onBarcodeScanned(code); },
-      () => {}  // silence les erreurs de frame
+      () => {}
     );
-    document.getElementById('scan-status').textContent = '🔍 Pointez vers un code-barres…';
+    document.getElementById('scan-status').textContent = '🔍 Centrez le code dans le cadre…';
   } catch(e) {
-    document.getElementById('scan-status').textContent = '⚠ Erreur : ' + e;
+    document.getElementById('scan-status').textContent = '⚠ ' + e;
   }
 }
 
