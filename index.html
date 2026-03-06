@@ -121,7 +121,7 @@
     font-size:10px; letter-spacing:.5px; cursor:pointer; transition:all .15s; text-transform:uppercase;
   }
   .action-btn.archive:hover { color:var(--green); border-color:var(--green); }
-  .action-btn.delete:hover  { color:var(--red);   border-color:var(--red); }
+  .action-btn.edit:hover    { color:var(--amber); border-color:var(--amber); }
 
   /* Modal */
   .modal-overlay {
@@ -291,6 +291,22 @@
 </div>
 
 <div class="toast-container" id="toasts"></div>
+
+<!-- Modal Changer Date -->
+<div class="modal-overlay" id="modal-edit" style="display:none" onclick="closeEditOutside(event)">
+  <div class="modal">
+    <div class="modal-title">Changer la date</div>
+    <div id="edit-product-name" style="font-family:'Fraunces',serif;font-size:16px;color:var(--muted);margin-bottom:20px;"></div>
+    <div class="form-group">
+      <label class="form-label">Nouvelle date de péremption (DLC)</label>
+      <input class="form-input" id="edit-date" type="date">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeEditDate()">Annuler</button>
+      <button class="btn-confirm" onclick="confirmEditDate()">Mettre à jour →</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const API_URL = "https://script.google.com/macros/s/AKfycbz425iBOjYC8raof6W44y0IcJlCZHzjOrMzzjw0ju8uXFCKvFSl-xmYi9tZvOoSvP0aZg/exec";
@@ -501,7 +517,48 @@ async function deleteProduct(id) {
   render();
 }
 
-// ── Filters ──
+// ── Changer la date ──
+let editingId = null;
+
+function openEditDate(id) {
+  const p = products.find(x => x.id === id);
+  if (!p) return;
+  editingId = id;
+  document.getElementById('edit-product-name').textContent = `${p.brand} – ${p.name}`;
+  document.getElementById('edit-date').value = p.dlc;
+  document.getElementById('modal-edit').style.display = 'flex';
+}
+
+function closeEditDate() {
+  document.getElementById('modal-edit').style.display = 'none';
+  editingId = null;
+}
+
+function closeEditOutside(e) { if (e.target.id === 'modal-edit') closeEditDate(); }
+
+async function confirmEditDate() {
+  const newDlc = document.getElementById('edit-date').value;
+  if (!newDlc) { toast('⚠ Sélectionne une date', true); return; }
+
+  const p = products.find(x => x.id === editingId);
+  if (!p) return;
+
+  closeEditDate();
+  toast(`⏳ Mise à jour de "${p.name}"…`);
+
+  try {
+    const data = await api({ action: 'updateEvent', eventId: p.eventId, dlc: newDlc });
+    if (data.success) {
+      p.dlc = newDlc;
+      toast(`✅ Date mise à jour → ${fmtDate(newDlc)}`);
+      render();
+    } else {
+      toast(`⚠ Erreur : ${data.error || 'inconnue'}`, true);
+    }
+  } catch(e) {
+    toast('⚠ Erreur réseau', true);
+  }
+}
 function setFilter(f, btn) {
   currentFilter = f;
   document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
@@ -564,7 +621,7 @@ const productCard = p => {
     ${p.barcode ? `<div class="card-date">Code : <span>${p.barcode}</span></div>` : ''}
     <div class="card-actions">
       <button class="action-btn archive" onclick="archiveProduct(${p.id})">✓ Archiver</button>
-      <button class="action-btn delete"  onclick="deleteProduct(${p.id})">✕ Supprimer</button>
+      <button class="action-btn edit"    onclick="openEditDate(${p.id})">📅 Changer date</button>
     </div>
   </div>`;
 };
