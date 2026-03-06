@@ -254,7 +254,7 @@
 </div>
 
 <div style="position:fixed;bottom:8px;left:12px;font-size:10px;color:var(--border);font-family:'DM Mono',monospace;z-index:50;letter-spacing:1px">
-  v1.6
+  v1.7
 </div>
 
 <!-- Modal -->
@@ -299,18 +299,11 @@
 
 <!-- Scanner Modal -->
 <div class="modal-overlay" id="modal-scanner" style="display:none" onclick="closeScannerOutside(event)">
-  <div class="modal" style="max-width:500px">
+  <div class="modal" style="max-width:480px">
     <div class="modal-title">📷 Scanner un code-barres</div>
-    <div style="position:relative;border-radius:10px;overflow:hidden;background:#000;aspect-ratio:4/3">
-      <video id="scanner-video" style="width:100%;height:100%;object-fit:cover" autoplay muted playsinline></video>
-      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
-        <div style="width:60%;height:40%;border:2px solid var(--amber);border-radius:8px;box-shadow:0 0 0 9999px rgba(0,0,0,.4)"></div>
-      </div>
-      <div id="scan-status" style="position:absolute;bottom:12px;left:0;right:0;text-align:center;font-size:12px;color:rgba(255,255,255,.7)">
-        Pointez vers un code-barres…
-      </div>
-    </div>
-    <div class="modal-actions" style="margin-top:16px">
+    <div id="scanner-inner" style="width:100%;border-radius:10px;overflow:hidden;background:#000;min-height:200px"></div>
+    <div id="scan-status" style="text-align:center;font-size:13px;color:var(--muted);margin-top:12px">⏳ Chargement…</div>
+    <div class="modal-actions" style="margin-top:12px">
       <button class="btn-cancel" onclick="closeScanner()">Annuler</button>
     </div>
   </div>
@@ -587,107 +580,69 @@ async function confirmEditDate() {
     toast('⚠ Erreur réseau', true);
   }
 }
-// ── Phase 4 : Scanner code-barres (canvas + ZXing) ──
-let scannerStream   = null;
-let scannerInterval = null;
+// ── Phase 4 : Scanner (Html5-QrCode) ──
+let html5Scanner = null;
 
 function preloadZXing() {
-  if (window.ZXing) return;
+  if (document.getElementById('html5qr-script')) return;
   const s = document.createElement('script');
-  s.src = 'https://unpkg.com/@zxing/library@0.18.6/umd/index.min.js';
+  s.id  = 'html5qr-script';
+  s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
   document.head.appendChild(s);
 }
 
 async function openScanner() {
   document.getElementById('modal-scanner').style.display = 'flex';
-  setScanMsg('📷 Démarrage caméra…');
-  const video = document.getElementById('scanner-video');
-  try {
-    scannerStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' } }
-    });
-    video.srcObject = scannerStream;
-    video.onloadedmetadata = () => {
-      video.play();
-      setScanMsg('🔍 Pointez vers un code-barres…');
-      startScanLoop(video);
-    };
-  } catch(e) {
-    setScanMsg('⚠ Caméra refusée — autorise l\'accès dans ton navigateur');
-  }
-}
+  document.getElementById('scan-status').textContent = '⏳ Chargement du scanner…';
 
-function setScanMsg(msg) {
-  document.getElementById('scan-status').textContent = msg;
+  // Attend que Html5Qrcode soit dispo (max 6s)
+  for (let i = 0; i < 20; i++) {
+    if (window.Html5Qrcode) break;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  if (!window.Html5Qrcode) {
+    document.getElementById('scan-status').textContent = '⚠ Scanner non disponible — vérifie ta connexion internet';
+    return;
+  }
+
+  try {
+    html5Scanner = new Html5Qrcode('scanner-inner');
+    await html5Scanner.start(
+      { facingMode: 'environment' },
+      {
+        fps: 15,
+        qrbox: { width: 280, height: 160 },
+        aspectRatio: 1.5,
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+        ]
+      },
+      (code) => { onBarcodeScanned(code); },
+      () => {}  // silence les erreurs de frame
+    );
+    document.getElementById('scan-status').textContent = '🔍 Pointez vers un code-barres…';
+  } catch(e) {
+    document.getElementById('scan-status').textContent = '⚠ Erreur : ' + e;
+  }
 }
 
 function closeScannerOutside(e) { if (e.target.id === 'modal-scanner') closeScanner(); }
 
-function closeScanner() {
-  if (scannerInterval) { clearInterval(scannerInterval); scannerInterval = null; }
-  if (scannerStream)   { scannerStream.getTracks().forEach(t => t.stop()); scannerStream = null; }
-  document.getElementById('modal-scanner').style.display = 'none';
-}
-
-function startScanLoop(video) {
-  // Priorité 1 : BarcodeDetector natif (Chrome Android)
-  if ('BarcodeDetector' in window) {
-    const detector = new BarcodeDetector();
-    let detected = false;
-    scannerInterval = setInterval(async () => {
-      if (detected || video.readyState < 2) return;
-      try {
-        const results = await detector.detect(video);
-        if (results.length) {
-          detected = true;
-          setScanMsg('✅ Code détecté !');
-          setTimeout(() => onBarcodeScanned(results[0].rawValue), 300);
-        }
-      } catch(e) {}
-    }, 250);
-    return;
-  }
-
-  // Priorité 2 : ZXing via canvas
-  const canvas  = document.createElement('canvas');
-  const ctx     = canvas.getContext('2d');
-  let detected  = false;
-  let reader    = null;
-
-  const waitAndScan = setInterval(() => {
-    if (!window.ZXing) return; // Attend que ZXing soit chargé
-    clearInterval(waitAndScan);
-
+async function closeScanner() {
+  if (html5Scanner) {
     try {
-      reader = new ZXing.MultiFormatReader();
-      reader.setHints(null);
-    } catch(e) {
-      setScanMsg('⚠ Scanner non disponible sur ce navigateur');
-      return;
-    }
-
-    setScanMsg('🔍 Pointez vers un code-barres…');
-
-    scannerInterval = setInterval(() => {
-      if (detected || video.readyState < 2 || !video.videoWidth) return;
-      try {
-        canvas.width  = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0);
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const lum     = new ZXing.RGBLuminanceSource(imgData.data, canvas.width, canvas.height);
-        const bmp     = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
-        const result  = reader.decode(bmp);
-        if (result) {
-          detected = true;
-          setScanMsg('✅ Code détecté !');
-          setTimeout(() => onBarcodeScanned(result.getText()), 300);
-        }
-      } catch(e) {
-        // NotFoundException normale — continue
-      }
-    }, 250);
-  }, 300);
+      if (html5Scanner.isScanning) await html5Scanner.stop();
+      html5Scanner.clear();
+    } catch(e) {}
+    html5Scanner = null;
+  }
+  document.getElementById('scanner-inner').innerHTML = '';
+  document.getElementById('modal-scanner').style.display = 'none';
 }
 
 function onBarcodeScanned(code) {
