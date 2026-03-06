@@ -219,7 +219,10 @@
   <div class="header-right">
     <div class="sync-status" onclick="fullSync()" title="Cliquer pour synchroniser">
       <div class="sync-dot" id="sync-dot"></div>
-      <span id="sync-label">Sync Sheets</span>
+      <div style="display:flex;flex-direction:column;gap:1px">
+        <span id="sync-label">Synchronisation…</span>
+        <span id="sync-time" style="font-size:9px;color:var(--muted)">jamais synchronisé</span>
+      </div>
     </div>
     <div class="date-display">
       <span id="clock">--:--</span>
@@ -351,9 +354,14 @@ function updateClock() {
 updateClock(); setInterval(updateClock, 1000);
 
 // ── Sync status UI ──
-function setSyncStatus(state, label) {
+function setSyncStatus(state, label, updateTime = false) {
   document.getElementById('sync-dot').className = 'sync-dot ' + state;
   document.getElementById('sync-label').textContent = label;
+  if (updateTime) {
+    const now = new Date();
+    document.getElementById('sync-time').textContent =
+      'sync à ' + now.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
+  }
 }
 
 // ── API helper JSONP (seule méthode compatible avec Google Apps Script) ──
@@ -401,7 +409,7 @@ async function fullSync() {
       nextId = products.length + 1;
       syncRetries = 0;
       const total = products.length;
-      setSyncStatus('connected', `${total} suivi${total > 1 ? 's' : ''}`);
+      setSyncStatus('connected', `${total} suivi${total > 1 ? 's' : ''}`, true);
       toast(`📅 ${total} produit${total > 1 ? 's' : ''} chargé${total > 1 ? 's' : ''}`);
     } else {
       setSyncStatus('error', 'Erreur Calendar');
@@ -530,15 +538,6 @@ async function verifyProduct(id) {
   }
   products = products.filter(x => x.id !== id);
   toast(`✓ "${p.name}" vérifié et retiré`);
-  render();
-}
-  const p = products.find(x => x.id === id);
-  if (!p) return;
-  if (p.eventId) {
-    try { await api({ action: 'deleteEvent', eventId: p.eventId }); } catch(e) {}
-  }
-  products = products.filter(x => x.id !== id);
-  toast(`✕ "${p.name}" supprimé du Calendar`);
   render();
 }
 
