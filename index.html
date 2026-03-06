@@ -240,6 +240,18 @@
 
 <div class="stats" id="stats-bar"></div>
 
+<!-- Barre de recherche rapide -->
+<div class="main" style="padding-bottom:0;margin-bottom:0">
+  <div class="barcode-row" style="max-width:520px">
+    <input class="form-input" id="quick-search" type="text" placeholder="🔍  Rechercher un produit ou scanner un code…"
+      oninput="onQuickInput()" onkeydown="if(event.key==='Enter')quickLookup()"
+      autocomplete="off"
+      style="flex:1;background:var(--surface);border-color:var(--border);font-size:13px">
+    <button class="btn-scan" onclick="quickLookup()" title="Rechercher">🔍</button>
+    <button class="btn-scan" onclick="openQuickScanner()" title="Scanner">📷</button>
+  </div>
+</div>
+
 <div class="main">
   <div class="toolbar">
     <div class="toolbar-left">
@@ -254,7 +266,7 @@
 </div>
 
 <div style="position:fixed;bottom:8px;left:12px;font-size:10px;color:var(--border);font-family:'DM Mono',monospace;z-index:50;letter-spacing:1px">
-  v1.8
+  v1.9
 </div>
 
 <!-- Modal -->
@@ -298,6 +310,17 @@
       <button onclick="saveToSheets()" style="background:transparent;border:none;color:var(--muted);font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px;cursor:pointer;text-decoration:underline;text-underline-offset:3px">
         + Enregistrer aussi dans la base produits Sheets
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal résultat recherche rapide -->
+<div class="modal-overlay" id="modal-quick" style="display:none" onclick="if(event.target.id==='modal-quick')closeQuick()">
+  <div class="modal" style="max-width:420px;text-align:center">
+    <div id="quick-result-content"></div>
+    <div class="modal-actions" style="margin-top:20px;justify-content:center">
+      <button class="btn-cancel" onclick="closeQuick()">Fermer</button>
+      <button class="btn-confirm" id="quick-add-btn" style="display:none" onclick="closeQuick();openModal()">＋ Ajouter une DLC →</button>
     </div>
   </div>
 </div>
@@ -585,7 +608,86 @@ async function confirmEditDate() {
     toast('⚠ Erreur réseau', true);
   }
 }
-// ── Enregistrer dans la base Sheets ──
+// ── Recherche rapide page d'accueil ──
+function onQuickInput() {
+  const q = document.getElementById('quick-search').value.trim();
+  if (!q) return;
+}
+
+function quickLookup() {
+  const q = document.getElementById('quick-search').value.trim().toLowerCase();
+  if (!q) { toast('⚠ Tape un nom ou un code-barres', true); return; }
+
+  // Cherche dans les produits actifs (Calendar)
+  const matches = products.filter(p =>
+    p.name.toLowerCase().includes(q) ||
+    p.brand.toLowerCase().includes(q) ||
+    (p.barcode && p.barcode.includes(q))
+  ).sort((a, b) => daysUntil(a.dlc) - daysUntil(b.dlc));
+
+  const content = document.getElementById('quick-result-content');
+  const addBtn  = document.getElementById('quick-add-btn');
+
+  if (matches.length > 0) {
+    const p    = matches[0];
+    const days = daysUntil(p.dlc);
+    const cls  = statusClass(days);
+    const colors = { red: 'var(--red)', yellow: 'var(--yellow)', green: 'var(--green)', grey: 'var(--muted)' };
+    const icons  = { red: '🔴', yellow: '🟡', green: '🟢', grey: '⚪' };
+
+    let extra = '';
+    if (matches.length > 1) {
+      extra = `<div style="margin-top:14px;font-size:11px;color:var(--muted)">${matches.length - 1} autre${matches.length > 2 ? 's' : ''} entrée${matches.length > 2 ? 's' : ''} trouvée${matches.length > 2 ? 's' : ''} pour ce produit</div>`;
+    }
+
+    content.innerHTML = `
+      <div style="font-size:32px;margin-bottom:10px">${icons[cls]}</div>
+      <div style="font-family:'Fraunces',serif;font-size:20px;font-weight:700;margin-bottom:4px">${p.name}</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px">${p.brand}</div>
+      <div style="background:var(--bg);border-radius:10px;padding:16px;margin-bottom:8px">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;letter-spacing:1px;text-transform:uppercase">Date de péremption</div>
+        <div style="font-family:'Fraunces',serif;font-size:26px;font-weight:700;color:${colors[cls]}">${fmtDate(p.dlc)}</div>
+        <div style="font-size:14px;color:${colors[cls]};margin-top:4px">${statusLabel(days)}</div>
+      </div>
+      ${extra}`;
+    addBtn.style.display = 'none';
+  } else {
+    // Pré-remplit le formulaire si on trouve dans Sheets
+    const sheetMatch = sheetProducts.find(p =>
+      (p.nom_article && p.nom_article.toLowerCase().includes(q)) ||
+      (p.patissier   && p.patissier.toLowerCase().includes(q))   ||
+      (p.code_barres && String(p.code_barres).includes(q))
+    );
+    if (sheetMatch) {
+      document.getElementById('f-brand').value   = sheetMatch.patissier   || sheetMatch.marque || '';
+      document.getElementById('f-name').value    = sheetMatch.nom_article || sheetMatch.nom    || '';
+      document.getElementById('f-barcode').value = sheetMatch.code_barres || '';
+      document.getElementById('f-search').value  = sheetMatch.nom_article || sheetMatch.nom    || '';
+    } else {
+      document.getElementById('f-search').value = document.getElementById('quick-search').value.trim();
+    }
+
+    content.innerHTML = `
+      <div style="font-size:40px;margin-bottom:12px">🔍</div>
+      <div style="font-family:'Fraunces',serif;font-size:18px;font-weight:700;margin-bottom:8px">Aucune DLC trouvée</div>
+      <div style="font-size:13px;color:var(--muted)">Ce produit n'a pas encore de date de péremption enregistrée.</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:6px">Tu veux en ajouter une ?</div>`;
+    addBtn.style.display = 'block';
+  }
+
+  document.getElementById('modal-quick').style.display = 'flex';
+  document.getElementById('quick-search').value = '';
+}
+
+function closeQuick() {
+  document.getElementById('modal-quick').style.display = 'none';
+}
+
+function openQuickScanner() {
+  // Réutilise le scanner — mais le résultat ira dans quickLookup
+  window._quickScanMode = true;
+  openScanner();
+}
 async function saveToSheets() {
   const brand   = document.getElementById('f-brand').value.trim();
   const name    = document.getElementById('f-name').value.trim();
@@ -678,6 +780,12 @@ async function closeScanner() {
 
 function onBarcodeScanned(code) {
   closeScanner();
+  if (window._quickScanMode) {
+    window._quickScanMode = false;
+    document.getElementById('quick-search').value = code;
+    quickLookup();
+    return;
+  }
   document.getElementById('f-search').value  = code;
   document.getElementById('f-barcode').value = code;
   toast(`📷 Code détecté : ${code}`);
